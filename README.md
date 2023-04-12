@@ -42,7 +42,7 @@ docker-compose run -e IS_FIRST_RUN=true --rm uwazi # Install/Re-install from emp
 docker-compose up -d uwazi # Run uwazi on background (automatic restart on reboot unless stopped)
 ```
 
-Open your browser at <http://localhost:3000/>. Initial user: _admin_, password: _admin_.
+Open your browser at <http://localhost:3000/>. Initial user: _admin_, password: _change this password now_.
 
 ### Basic docker commands
 

@@ -7,84 +7,81 @@ services:
     ports:
       - 3000:3000
     environment:
+      - NODE_ENV=production
       - DBHOST=mongo
-      - DATABASE_NAME=uwazi_development
+      - DATABASE_NAME=uwazi
+      - INDEX_NAME=uwazi
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - UPLOADS_FOLDER=/data/uploaded_documents
-      # - LOGS_DIR=/path/to/log
       - IS_FIRST_RUN=${IS_FIRST_RUN:-false}
     volumes:
       - uploaded_documents:/data/uploaded_documents
     depends_on:
-      - elasticsearch
-      - mongo
+      elasticsearch:
+          condition: service_started
+      mongo:
+          condition: service_healthy
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:5.5.3
-    restart: unless-stopped
-    command: elasticsearch -Expack.security.enabled=false -Ecluster.name=docker-cluster -Ehttp.port=9200 -Ehttp.cors.allow-origin="http://localhost:51000" -Ehttp.cors.enabled=true -Ehttp.cors.allow-headers=X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization -Ehttp.cors.allow-credentials=true
-    environment:
-      - cluster.name=docker-cluster
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=false
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
+    build:
+      context: .
+      dockerfile: elastic-icu-7.17.6.Dockerfile
+    container_name: uwazi-elasticsearch
     volumes:
-      - elasticsearch_data1:/usr/share/elasticsearch/data
-    # Close these ports. No unprotected elasticsearch should be published.
-    # ports:
-    #  - 9200:9200
-
-  # dejavu "The Missing Web UI for Elasticsearch"
-  # See https://github.com/appbaseio/dejavu
-  # To configure, access http://localhost:51000 and use:
-  #    http://localhost:9200
-  #    uwazi_development
-  elasticsearch-gui-dejavu:
-    image: appbaseio/dejavu:latest
+      - esdata01:/usr/share/elasticsearch/data
     ports:
-      #- "1358:1358"
-      - "51000:1358"
-    depends_on:
-      - elasticsearch
+      - '9200:9200'
+    environment:
+      - bootstrap.memory_lock=true
+      - indices.query.bool.max_clause_count=2048
+      - discovery.type=single-node
+      - 'ES_JAVA_OPTS=-Xms2g -Xmx2g'
+      - cluster.routing.allocation.disk.threshold_enabled=false
 
   mongo:
-    image: mongo:3.4
-    restart: unless-stopped
+    image: "mongo:4.2"
+    container_name: uwazi-mongo
+    command: mongod --replSet "uwazi_replica_set"
+    healthcheck:
+      test: test $$(echo "rs.initiate().ok || rs.status().ok" | mongo --quiet) -eq 1
+      interval: 10s
+      retries: 5
+      start_period: 10s
     volumes:
-      # - ./data/mongo:/data/db
-      - mongodb_data1:/data/db
-    command: mongod --smallfiles
-  # Don't publish unprotected mongod
-  #  ports:
-  #    - 27017:27017
-    logging:
-      options:
-        max-size: 10m
-        max-file: '3'
-
-  # Cross-platform and self hosted, easy to use mongodb management tool - Formerly Mongoclient
-  # See https://github.com/nosqlclient/nosqlclient
-  mongo-gui-mongoclient:
-    image: mongoclient/mongoclient:latest
-    volumes:
-     - ./data/mongo:/data/db
-    environment:
-      - MONGO_URL=mongodb://mongo:27017
-    depends_on:
-      - mongo
+      - mongodata:/data/db
     ports:
-      - 52000:3000
+      - '27017:27017'
+
+  mongoreplicaset_start_script:
+    image: "mongo:4.2"
+    restart: "no"
+    container_name: mongoreplicaset_start_script
+    depends_on:
+      mongo:
+        condition: service_started
+    entrypoint: [ "bash", "-c", "sleep 1 && mongo --host mongo:27017 --eval 'rs.initiate();cfg = rs.config(); cfg.members[0].host = \"mongo:27017\";rs.reconfig(cfg, {force:true})'"]      
+
+  redis:
+    image: 'redis:5.0.14'
+    container_name: uwazi-redis
+    command: redis-server
+    ports:
+      - '6379:6379'
+    environment:
+      - REDIS_REPLICATION_MODE=master
+
+  minio:
+    image: minio/minio
+    container_name: uwazi-s3
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - miniodata:/data
+    command: server /data --console-address :9001
 
 volumes:
+  esdata01:
+  mongodata:
+  miniodata:
   uploaded_documents:
-    driver: local
-  mongodb_data1:
-    driver: local
-  elasticsearch_data1:
-    driver: local
-
-
-
